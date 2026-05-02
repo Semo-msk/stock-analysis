@@ -17,35 +17,46 @@ from dotenv import load_dotenv
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"))
 
 
-def build_llm():
+def build_llm(provider: str = "auto"):
     """
-    환경변수에 따라 Gemini 또는 Claude LLM을 초기화합니다.
-    GOOGLE_API_KEY가 있으면 Gemini, ANTHROPIC_API_KEY가 있으면 Claude를 사용합니다.
+    LLM을 초기화합니다.
+
+    Args:
+        provider: "auto" | "gemini" | "claude"
+          - auto: GOOGLE_API_KEY 우선, 없으면 ANTHROPIC_API_KEY
+          - gemini: Gemini 강제 사용
+          - claude: Claude 강제 사용
     """
     google_key = os.getenv("GOOGLE_API_KEY")
     anthropic_key = os.getenv("ANTHROPIC_API_KEY")
 
-    if google_key:
+    use_gemini = (provider == "gemini") or (provider == "auto" and google_key)
+    use_claude = (provider == "claude") or (provider == "auto" and not google_key and anthropic_key)
+
+    if use_gemini and google_key:
         from langchain_google_genai import ChatGoogleGenerativeAI
-        print("✅ LLM: Google Gemini 사용")
+        print("✅ LLM: Google Gemini (gemini-2.5-flash)")
         return ChatGoogleGenerativeAI(
             model="gemini-2.5-flash",
             google_api_key=google_key,
             temperature=0.3,
         )
-    elif anthropic_key:
+    elif use_claude and anthropic_key:
         from langchain_anthropic import ChatAnthropic
-        print("✅ LLM: Anthropic Claude 사용")
+        print("✅ LLM: Anthropic Claude (claude-sonnet-4-6)")
         return ChatAnthropic(
             model="claude-sonnet-4-6",
             anthropic_api_key=anthropic_key,
             temperature=0.3,
         )
     else:
-        print("❌ 오류: GOOGLE_API_KEY 또는 ANTHROPIC_API_KEY 환경변수를 설정해 주세요.")
-        print("   .env 파일에 다음 중 하나를 추가하세요:")
-        print("   GOOGLE_API_KEY=your_key_here")
-        print("   ANTHROPIC_API_KEY=your_key_here")
+        available = []
+        if google_key:
+            available.append("--llm gemini")
+        if anthropic_key:
+            available.append("--llm claude")
+        hint = f"사용 가능: {', '.join(available)}" if available else "API 키를 .env에 설정하세요."
+        print(f"❌ 오류: '{provider}' LLM을 초기화할 수 없습니다. {hint}")
         sys.exit(1)
 
 
@@ -83,30 +94,9 @@ def format_report(result: dict) -> str:
 *⚠️ 본 보고서는 AI가 생성한 정보로, 투자 권유가 아닙니다. 투자 결정은 본인의 판단과 책임하에 이루어져야 합니다.*
 """
     else:
-        title = f"# 📊 기업 분석 보고서: {result['company_name']} ({result['ticker']})"
-        body = f"""
-{title}
-> 분석 일시: {now} | 분석 방법: Bottom-up (기업→재무→경쟁→리스크)
+        from pipelines.bottomup import generate_bottomup_report
+        return generate_bottomup_report(result, now)
 
----
-
-{result['step1_business']}
-
----
-
-{result['step2_financials']}
-
----
-
-{result['step3_competitors']}
-
----
-
-{result['step4_risks']}
-
----
-*⚠️ 본 보고서는 AI가 생성한 정보로, 투자 권유가 아닙니다. 투자 결정은 본인의 판단과 책임하에 이루어져야 합니다.*
-"""
     return body.strip()
 
 
@@ -120,8 +110,10 @@ def save_report(content: str, output_path: str):
 def main():
     parser = argparse.ArgumentParser(description="주식투자 분석 자동화 시스템")
     parser.add_argument("--input", "-i", type=str, help="분석 대상 (예: AAPL, AI 반도체)")
-    parser.add_argument("--output", "-o", type=str, help="보고서 저장 경로 (예: report.md)")
+    parser.add_argument("--output", "-o", type=str, help="보고서 저장 경로 (기본: reports/YYMMDD_이름.md)")
     parser.add_argument("--competitors", "-c", type=str, help="경쟁사 티커 (쉼표 구분, 예: MSFT,GOOGL)")
+    parser.add_argument("--llm", type=str, default="auto", choices=["auto", "gemini", "claude"],
+                        help="사용할 LLM (기본: auto → Gemini 우선)")
     args = parser.parse_args()
 
     print("=" * 60)
@@ -138,7 +130,7 @@ def main():
         sys.exit(0)
 
     # LLM 초기화
-    llm = build_llm()
+    llm = build_llm(args.llm)
 
     # 입력 분류 (라우팅)
     print(f"\n🤖 입력 분류 중: '{user_input}'")
@@ -166,11 +158,17 @@ def main():
         print("\n" + "=" * 60)
         print(report)
 
-        # 파일 저장
-        output_path = args.output
-        if not output_path:
+        # 보고서 저장 경로: reports/YYMMDD_<이름>.md
+        reports_dir = os.path.join(os.path.dirname(__file__), "reports")
+        os.makedirs(reports_dir, exist_ok=True)
+
+        if args.output:
+            # --output 옵션이 있으면 그 경로 그대로 사용
+            output_path = args.output
+        else:
+            date_str = datetime.now().strftime("%y%m%d")
             safe_name = classification["normalized"].replace(" ", "_").replace("/", "-")
-            output_path = f"report_{safe_name}_{datetime.now().strftime('%Y%m%d_%H%M')}.md"
+            output_path = os.path.join(reports_dir, f"{date_str}_{safe_name}.md")
 
         save_report(report, output_path)
 
