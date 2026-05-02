@@ -57,7 +57,7 @@ def format_report(result: dict) -> str:
         title = f"# 📈 산업/테마 분석 보고서: {result['theme']}"
         body = f"""
 {title}
-> 분석 일시: {now} | 분석 방법: Top-down (거시→산업→기업)
+> 분석 일시: {now} | 분석 방법: Top-down v2 (거시→사이클→동향→촉매→최선호주)
 
 ---
 
@@ -65,11 +65,19 @@ def format_report(result: dict) -> str:
 
 ---
 
-{result['step2_growth']}
+{result['step2_cycle']}
 
 ---
 
-{result['step3_players']}
+{result['step3_trends']}
+
+---
+
+{result['step4_catalyst']}
+
+---
+
+{result['step5_picks']}
 
 ---
 *⚠️ 본 보고서는 AI가 생성한 정보로, 투자 권유가 아닙니다. 투자 결정은 본인의 판단과 책임하에 이루어져야 합니다.*
