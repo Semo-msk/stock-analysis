@@ -22,6 +22,12 @@ INDUSTRY_KEYWORDS = {
     "우주", "space", "게임", "gaming", "사이버보안", "cybersecurity",
 }
 
+# 월간 리뷰 트리거 키워드 (--mode monthly 없이도 자동 감지)
+MONTHLY_REVIEW_KEYWORDS = {
+    "월간리뷰", "월간 리뷰", "모임자료", "모임 자료", "스터디자료",
+    "monthly review", "market review", "월간시장", "이번달시장",
+}
+
 
 def classify_input(user_input: str, llm) -> dict:
     """
@@ -32,7 +38,7 @@ def classify_input(user_input: str, llm) -> dict:
         llm: LangChain LLM 인스턴스
 
     Returns:
-        {"type": "industry"|"company", "normalized": str, "reason": str}
+        {"type": "industry"|"company"|"monthly_review", "normalized": str, "reason": str}
     """
     cleaned = user_input.strip()
 
@@ -49,6 +55,15 @@ def _rule_based_classify(text: str) -> dict | None:
     """간단한 규칙으로 분류합니다. 확실하지 않으면 None 반환."""
     upper = text.upper().strip()
     lower = text.lower().strip()
+
+    # 월간 리뷰 키워드 감지 (쉼표 구분 다중 테마 포함)
+    for keyword in MONTHLY_REVIEW_KEYWORDS:
+        if keyword in lower:
+            return {
+                "type": "monthly_review",
+                "normalized": text,
+                "reason": f"'{keyword}' 키워드가 감지된 월간 시장 리뷰 요청입니다."
+            }
 
     # 티커 패턴 매칭 (예: AAPL, NVDA, 005930.KS)
     if TICKER_PATTERN.match(upper):

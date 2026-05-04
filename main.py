@@ -6,6 +6,7 @@
     python main.py --input "NVDA"
     python main.py --input "AI 반도체" --output report.md
     python main.py --input "AAPL" --competitors "MSFT,GOOGL"
+    python main.py --input "이란전쟁,스페이스X IPO,루멘텀홀딩스" --mode monthly
 """
 
 import argparse
@@ -93,6 +94,9 @@ def format_report(result: dict) -> str:
 ---
 *⚠️ 본 보고서는 AI가 생성한 정보로, 투자 권유가 아닙니다. 투자 결정은 본인의 판단과 책임하에 이루어져야 합니다.*
 """
+    elif result["type"] == "market-review":
+        from pipelines.market_review import generate_market_review_report
+        return generate_market_review_report(result, now)
     else:
         from pipelines.bottomup import generate_bottomup_report
         return generate_bottomup_report(result, now)
@@ -109,11 +113,13 @@ def save_report(content: str, output_path: str):
 
 def main():
     parser = argparse.ArgumentParser(description="주식투자 분석 자동화 시스템")
-    parser.add_argument("--input", "-i", type=str, help="분석 대상 (예: AAPL, AI 반도체)")
+    parser.add_argument("--input", "-i", type=str, help="분석 대상 (예: AAPL, AI 반도체, 또는 monthly 모드에서 쉼표 구분 테마)")
     parser.add_argument("--output", "-o", type=str, help="보고서 저장 경로 (기본: reports/YYMMDD_이름.md)")
     parser.add_argument("--competitors", "-c", type=str, help="경쟁사 티커 (쉼표 구분, 예: MSFT,GOOGL)")
     parser.add_argument("--llm", type=str, default="auto", choices=["auto", "gemini", "claude"],
                         help="사용할 LLM (기본: auto → Gemini 우선)")
+    parser.add_argument("--mode", "-m", type=str, default="auto", choices=["auto", "monthly"],
+                        help="분석 모드 (기본: auto | monthly: 투자 스터디용 월간 시장 리뷰)")
     args = parser.parse_args()
 
     print("=" * 60)
@@ -123,7 +129,13 @@ def main():
     # 입력 받기
     user_input = args.input
     if not user_input:
-        user_input = input("\n분석할 주제를 입력하세요\n(예: AI반도체 / NVDA / 자율주행 / AAPL)\n> ").strip()
+        if args.mode == "monthly":
+            user_input = input(
+                "\n월간 리뷰 테마를 쉼표로 구분하여 입력하세요\n"
+                "(예: 이란전쟁, 스페이스X IPO, 루멘텀홀딩스)\n> "
+            ).strip()
+        else:
+            user_input = input("\n분석할 주제를 입력하세요\n(예: AI반도체 / NVDA / 자율주행 / AAPL)\n> ").strip()
 
     if not user_input:
         print("입력값이 없습니다. 프로그램을 종료합니다.")
@@ -132,7 +144,33 @@ def main():
     # LLM 초기화
     llm = build_llm(args.llm)
 
-    # 입력 분류 (라우팅)
+    # ── 월간 리뷰 모드 ────────────────────────────────────────────────────────
+    if args.mode == "monthly":
+        themes = [t.strip() for t in user_input.split(",") if t.strip()]
+        if not themes:
+            print("❌ 테마를 하나 이상 입력하세요. (쉼표 구분)")
+            sys.exit(1)
+
+        from pipelines.market_review import run_market_review_pipeline
+        result = run_market_review_pipeline(themes, llm)
+
+        report = format_report(result)
+        print("\n" + "=" * 60)
+        print(report)
+
+        reports_dir = os.path.join(os.path.dirname(__file__), "reports")
+        os.makedirs(reports_dir, exist_ok=True)
+
+        if args.output:
+            output_path = args.output
+        else:
+            date_str = datetime.now().strftime("%y%m%d")
+            output_path = os.path.join(reports_dir, f"{date_str}_월간리뷰.md")
+
+        save_report(report, output_path)
+        return
+
+    # ── 기존 auto 모드 (top-down / bottom-up) ─────────────────────────────────
     print(f"\n🤖 입력 분류 중: '{user_input}'")
     from router import classify_input
     classification = classify_input(user_input, llm)
